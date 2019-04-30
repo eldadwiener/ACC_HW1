@@ -68,10 +68,28 @@ long long int distance_sqr_between_image_arrays(uchar *img_arr1, uchar *img_arr2
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 __device__ uchar arr_min(uchar arr[], int arr_size) {
-    return 0; //TODO
+    __shared__ uchar SharedMin;
+    // TODO: DID WE UNDERSTAND CORRECTLY?!!?!? 
+    int tid = threadIdx.x;
+    if((arr[tid] > 0) && ((tid == 0) || (arr[tid-1] == 0))) // cdf is a rising function, so only the first non zero will have zero before it.
+        {SharedMin = tid;
+        printf("tid - %d,SharedMin - %c",tid,SharedMin);}
+    __syncthreads();
+    return SharedMin; //TODO
 }
 
 __device__ void prefix_sum(int arr[], int arr_size) {
+    int tid = threadIdx.x;
+    int increment;
+    for ( int stride = 1 ; stride <= arr_size-1 ; stride*=2 )
+    {
+        increment = 0;
+        if(tid>=stride)
+            increment = arr[tid - stride];
+        __syncthreads();
+        arr[tid] += increment;
+        __syncthreads();
+    }
     return; //TODO
 }
 
