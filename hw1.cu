@@ -86,7 +86,6 @@ __device__ void prefix_sum(int arr[], int arr_size) {
         increment = 0;
         if(tid>=stride)
             increment = arr[tid - stride];
-        //increment = (tid>=stride)*arr[(tid>=stride)*(tid-stride)];
         __syncthreads();
         arr[tid] += increment;
         __syncthreads();
@@ -104,6 +103,7 @@ __global__ void process_image_kernel(uchar *in, uchar *out) {
     in += bid*IMG_HEIGHT*IMG_WIDTH;
     out += bid*IMG_HEIGHT*IMG_WIDTH;
     __syncthreads(); // make sure hist is initiated before we continue
+    // start updating the histogram, one row at a time
     for(int row = 0; row < IMG_HEIGHT; ++row)
     {
         int val = *(in+(IMG_WIDTH*row)+tid);
@@ -113,22 +113,15 @@ __global__ void process_image_kernel(uchar *in, uchar *out) {
    // hist is ready, build cdf
     prefix_sum(hist,256);
     __syncthreads();
-   // hist arr now contains cdf
+   // hist arr now contains cdf, get cdfMin
     int cdfMinId = arr_min(hist,256);
     // build map array
     __shared__ uchar map[256];
     map[tid] = 255 * (((double)(hist[tid]-cdfMinId))/(IMG_HEIGHT*IMG_WIDTH - cdfMinId));
     __syncthreads();
+    // update the output image values by using the map array
    for(int row = 0; row < IMG_HEIGHT; ++row)
-    {
         *(out+(256*row)+tid) = map[*(in+(256*row)+tid)];
-    }
-    /*if(tid == 0){         // debug
-        printf("\nOutput:\n(");
-        for(int i = 0;i<256;++i){
-            printf("%d, ",out[i]);
-            if(i % 16 == 0) printf(")\n(");}
-        }*/
     return ;
 }
 
