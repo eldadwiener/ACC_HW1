@@ -6,7 +6,7 @@
 ///////////////////////////////////////////////// DO NOT CHANGE ///////////////////////////////////////
 #define IMG_HEIGHT 256
 #define IMG_WIDTH 256
-#define N_IMAGES 1
+#define N_IMAGES 10000
 
 typedef unsigned char uchar;
 
@@ -50,6 +50,24 @@ void process_image(uchar *img_in, uchar *img_out) {
     for (int i = 0; i < IMG_WIDTH * IMG_HEIGHT; i++) {
         img_out[i] = map[img_in[i]];
     }
+    //debug, TODO REMOVE
+    /*printf("\nCPU PRINTS:\n\nHistogram:\n(");
+    for(int i = 0;i<256;++i){
+        printf("%d, ",histogram[i]);
+        if(i % 16 == 0) printf(")\n(");}
+    printf("\n\nCDF:\n(");
+    for(int i = 0;i<256;++i){
+        printf("%d, ",cdf[i]);
+        if(i % 16 == 0) printf(")\n(");}
+    printf("\n\nMap:\n(");
+    for(int i = 0;i<256;++i){
+        printf("%d, ",map[i]);
+        if(i % 16 == 0) printf(")\n(");}
+    printf("\n\nCPU Out:\n(");
+    for(int i = 0;i<256;++i){
+        printf("%d, ",img_out[i]);
+        if(i % 16 == 0) printf(")\n(");}
+    */
 }
 
 double static inline get_time_msec(void) {
@@ -69,12 +87,14 @@ long long int distance_sqr_between_image_arrays(uchar *img_arr1, uchar *img_arr2
 
 __device__ int arr_min(int arr[], int arr_size) {
     // assume arr_size threads call this function for arr[]
-    __shared__ int SharedMin = 0;
+    __shared__ int SharedMin;
     // TODO: DID WE UNDERSTAND CORRECTLY?!!?!? 
     int tid = threadIdx.x;
     if((arr[tid] > 0) && ((tid == 0) || (arr[tid-1] == 0))) // cdf is a rising function, so only the first non zero will have zero before it.
-        {SharedMin = arr[tid];
-        printf("tid - %d,SharedMin - %c",tid,SharedMin);}
+    {
+        SharedMin = arr[tid];
+        //printf("\ntid - %d,SharedMin - %d\n",tid,SharedMin);
+    }
     __syncthreads();
     return SharedMin; //TODO
 }
@@ -97,27 +117,59 @@ __device__ void prefix_sum(int arr[], int arr_size) {
 __global__ void process_image_kernel(uchar *in, uchar *out) {
     int tid = threadIdx.x;
     int bid = blockIdx.x;
-    __shared__ int hist[256] = { 0 };
+    __shared__ int hist[256]; //TODO: do we need more hist?
+    // init hist to 0
+    in += bid*IMG_HEIGHT*IMG_WIDTH;
+    out += bid*IMG_HEIGHT*IMG_WIDTH;
+    hist[tid] = 0;
+    __syncthreads();
     for(int row = 0; row < IMG_HEIGHT; ++row)
     {
-        int val = in[row][tid];
+        int val = *(in+(IMG_WIDTH*row)+tid);
         atomicAdd(&hist[val],1);
     }
     __syncthreads();
+    /*if(tid == 0){ // debug
+        printf("\nGPU PRINTS:\n\nHistogram:\n(");
+        for(int i = 0;i<256;++i){
+            printf("%d, ",hist[i]);
+            if(i % 16 == 0) printf(")\n(");}
+    }
+    __syncthreads(); //debug*/
     // hist is ready, build cdf
     prefix_sum(hist,256);
     __syncthreads();
+    /*if(tid == 0){ // debug
+        printf("\nCDF:\n(");
+        for(int i = 0;i<256;++i){
+            printf("%d, ",hist[i]);
+            if(i % 16 == 0) printf(")\n(");}
+    }
+    __syncthreads(); //debug*/
     // hist arr now contains cdf
     int cdfMinId = arr_min(hist,256);
     // build map array
     __shared__ uchar map[256];
-    map[tid] = 255 * ((hist[tid]-cdfMinId)/(IMG_HEIGHT*IMG_WIDTH - cdfMinId));
+    map[tid] = 255 * (((double)(hist[tid]-cdfMinId))/(IMG_HEIGHT*IMG_WIDTH - cdfMinId));
     __syncthreads();
+    /*if(tid == 0){ // debug
+        printf("\nMap:\n(");
+        for(int i = 0;i<256;++i){
+            printf("%d, ",map[i]);
+            if(i % 16 == 0) printf(")\n(");}
+    }
+    __syncthreads(); //debug*/
     // create new image
     for(int row = 0; row < IMG_HEIGHT; ++row)
     {
-        out[row][tid] = map[in[row][tid]];
+        *(out+(256*row)+tid) = map[*(in+(256*row)+tid)];
     }
+    /*if(tid == 0){ // debug
+        printf("\nOutput:\n(");
+        for(int i = 0;i<256;++i){
+            printf("%d, ",out[i]);
+            if(i % 16 == 0) printf(")\n(");}
+        }*/
     return ; //TODO
 }
 
@@ -135,7 +187,8 @@ int main() {
     /* instead of loading real images, we'll load the arrays with random data */
     srand(0);
     for (long long int i = 0; i < N_IMAGES * IMG_WIDTH * IMG_HEIGHT; i++) {
-        images_in[i] = rand() % 256;
+        images_in[i] = rand() % 256;// TODO: leave britney alone!
+        //images_in[i] = 4;
     }
 
     double t_start, t_finish;
@@ -157,7 +210,7 @@ int main() {
     // GPU task serial computation
     printf("\n=== GPU Task Serial ===\n"); //Do not change
     //TODO: allocate GPU memory for a single input image and a single output image
-    uchar* img_in, img_out;
+    uchar *img_in, *img_out;
     cudaMalloc((void**)&img_in,IMG_HEIGHT*IMG_WIDTH);
     cudaMalloc((void**)&img_out,IMG_HEIGHT*IMG_WIDTH);
     t_start = get_time_msec(); //Do not change
@@ -178,19 +231,35 @@ int main() {
             return 1;
         }
         // no error, copy image to cpu memory
-        cudaMemcpy(img_out, &images_out[i * IMG_WIDTH * IMG_HEIGHT], IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost);
+        cudaMemcpy(&images_out_gpu_serial[i * IMG_WIDTH * IMG_HEIGHT], img_out, IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost);
     }
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_serial); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not change
+    // TODO : Free memory
 
     // GPU bulk
     printf("\n=== GPU Bulk ===\n"); //Do not change
     //TODO: allocate GPU memory for a all input images and all output images
+    cudaMalloc((void**)&img_in,IMG_HEIGHT*IMG_WIDTH*N_IMAGES);
+    cudaMalloc((void**)&img_out,IMG_HEIGHT*IMG_WIDTH*N_IMAGES);
     t_start = get_time_msec(); //Do not change
     //TODO: copy all input images from images_in to the GPU memory you allocated
     //TODO: invoke a kernel with N_IMAGES threadblocks, each working on a different image
     //TODO: copy output images from GPU memory to images_out_gpu_bulk
+    cudaMemcpy(img_in,images_in, N_IMAGES * IMG_HEIGHT * IMG_WIDTH,cudaMemcpyHostToDevice);
+    dim3 threads(256),blocks(N_IMAGES);
+    process_image_kernel<<<blocks,threads>>>(img_in,img_out);
+    cudaDeviceSynchronize();
+    // Check for errors
+    cudaError_t error = cudaGetLastError();
+    if(error != cudaSuccess){
+        fprintf(stderr,"Kernel execution failed:%s\n",cudaGetErrorString(error));
+        return 1;
+    }
+    // no error, copy image to cpu memory
+    cudaMemcpy(images_out_gpu_bulk, img_out, N_IMAGES * IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost);
+    // TODO: free memory
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_bulk); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not chhange
