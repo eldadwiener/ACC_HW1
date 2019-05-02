@@ -86,6 +86,7 @@ __device__ void prefix_sum(int arr[], int arr_size) {
         increment = 0;
         if(tid>=stride)
             increment = arr[tid - stride];
+        //increment = (tid>=stride)*arr[(tid>=stride)*(tid-stride)];
         __syncthreads();
         arr[tid] += increment;
         __syncthreads();
@@ -168,8 +169,8 @@ int main() {
     printf("\n=== GPU Task Serial ===\n"); //Do not change
     // allocate GPU memory for a single input image and a single output image
     uchar *img_in, *img_out;
-    cudaMalloc((void**)&img_in,IMG_HEIGHT*IMG_WIDTH);
-    cudaMalloc((void**)&img_out,IMG_HEIGHT*IMG_WIDTH);
+    CUDA_CHECK(cudaMalloc((void**)&img_in,IMG_HEIGHT*IMG_WIDTH));
+    CUDA_CHECK(cudaMalloc((void**)&img_out,IMG_HEIGHT*IMG_WIDTH));
 
     t_start = get_time_msec(); //Do not change
     //in a for loop:
@@ -178,10 +179,10 @@ int main() {
     //   3. copy output from GPU memory to relevant location in images_out_gpu_serial
     for(int i = 0; i < N_IMAGES; ++i)
     {
-        cudaMemcpy(img_in,&images_in[i * IMG_WIDTH * IMG_HEIGHT], IMG_HEIGHT * IMG_WIDTH,cudaMemcpyHostToDevice);
+        CUDA_CHECK(cudaMemcpy(img_in,&images_in[i * IMG_WIDTH * IMG_HEIGHT], IMG_HEIGHT * IMG_WIDTH,cudaMemcpyHostToDevice));
         dim3 threads(256),blocks(1);
         process_image_kernel<<<blocks,threads>>>(img_in,img_out);
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaDeviceSynchronize());
         // Check for errors
         cudaError_t error = cudaGetLastError();
         if(error != cudaSuccess){
@@ -189,48 +190,41 @@ int main() {
             return 1;
         }
         // no error, copy image to cpu memory
-        cudaMemcpy(&images_out_gpu_serial[i * IMG_WIDTH * IMG_HEIGHT], img_out, IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost);
+        CUDA_CHECK(cudaMemcpy(&images_out_gpu_serial[i * IMG_WIDTH * IMG_HEIGHT], img_out, IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost));
     }
 
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_serial); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not change
     // Free the allocated memory before rewriting the pointers
-    cudaFree(img_in);
-    cudaFree(img_out);
+    CUDA_CHECK(cudaFree(img_in));
+    CUDA_CHECK(cudaFree(img_out));
 
     // GPU bulk
     printf("\n=== GPU Bulk ===\n"); //Do not change
     //allocate GPU memory for a all input images and all output images
-    cudaMalloc((void**)&img_in,IMG_HEIGHT*IMG_WIDTH*N_IMAGES);
-    cudaMalloc((void**)&img_out,IMG_HEIGHT*IMG_WIDTH*N_IMAGES);
+    CUDA_CHECK(cudaMalloc((void**)&img_in,IMG_HEIGHT*IMG_WIDTH*N_IMAGES));
+    CUDA_CHECK(cudaMalloc((void**)&img_out,IMG_HEIGHT*IMG_WIDTH*N_IMAGES));
 
     t_start = get_time_msec(); //Do not change
     //copy all input images from images_in to the GPU memory you allocated
     //invoke a kernel with N_IMAGES threadblocks, each working on a different image
     //copy output images from GPU memory to images_out_gpu_bulk
-    cudaMemcpy(img_in,images_in, N_IMAGES * IMG_HEIGHT * IMG_WIDTH,cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMemcpy(img_in,images_in, N_IMAGES * IMG_HEIGHT * IMG_WIDTH,cudaMemcpyHostToDevice));
     dim3 threads(256),blocks(N_IMAGES);
     process_image_kernel<<<blocks,threads>>>(img_in,img_out);
-    cudaDeviceSynchronize();
-    // Check for errors
-    cudaError_t error = cudaGetLastError();
-    if(error != cudaSuccess){
-        fprintf(stderr,"Kernel execution failed:%s\n",cudaGetErrorString(error));
-        return 1;
-    }
-    // no error, copy image to cpu memory
-    cudaMemcpy(images_out_gpu_bulk, img_out, N_IMAGES * IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(images_out_gpu_bulk, img_out, N_IMAGES * IMG_HEIGHT * IMG_WIDTH,cudaMemcpyDeviceToHost));
 
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_bulk); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not chhange
     // Free all of the remaining allocated memory before completion
-    cudaFree(img_in);
-    cudaFree(img_out);
-    cudaFreeHost(images_in);
-    cudaFreeHost(images_out_cpu);
-    cudaFreeHost(images_out_gpu_bulk);
-    cudaFreeHost(images_out_gpu_serial);
+    CUDA_CHECK(cudaFree(img_in));
+    CUDA_CHECK(cudaFree(img_out));
+    CUDA_CHECK(cudaFreeHost(images_in));
+    CUDA_CHECK(cudaFreeHost(images_out_cpu));
+    CUDA_CHECK(cudaFreeHost(images_out_gpu_bulk));
+    CUDA_CHECK(cudaFreeHost(images_out_gpu_serial));
     return 0;
 }
